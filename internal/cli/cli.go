@@ -14,17 +14,17 @@ import (
 
 // Config holds the CLI configuration
 type Config struct {
-	IncludePaths    []string
-	Jobs            int
-	HTML            bool
-	CoverDir        string
-	NoRerunFailed   bool
-	Verbose         bool
-	TestPaths       []string
-	SourceDirs      []string
-	OutputDir       string
-	ShowVersion     bool
-	IgnoreDirs      []string
+	IncludePaths  []string
+	Jobs          int
+	HTML          bool
+	CoverDir      string
+	NoRerunFailed bool
+	Verbose       bool
+	TestPaths     []string
+	SourceDirs    []string
+	OutputDir     string
+	ShowVersion   bool
+	IgnoreDirs    []string
 }
 
 // Version information
