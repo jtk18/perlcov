@@ -1,0 +1,57 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Build binaries
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+
+          # Linux amd64
+          GOOS=linux GOARCH=amd64 go build -ldflags "-s -w" -o perlcov-linux-amd64 ./cmd/perlcov/
+
+          # Linux arm64
+          GOOS=linux GOARCH=arm64 go build -ldflags "-s -w" -o perlcov-linux-arm64 ./cmd/perlcov/
+
+          # macOS amd64
+          GOOS=darwin GOARCH=amd64 go build -ldflags "-s -w" -o perlcov-darwin-amd64 ./cmd/perlcov/
+
+          # macOS arm64 (Apple Silicon)
+          GOOS=darwin GOARCH=arm64 go build -ldflags "-s -w" -o perlcov-darwin-arm64 ./cmd/perlcov/
+
+          # Windows amd64
+          GOOS=windows GOARCH=amd64 go build -ldflags "-s -w" -o perlcov-windows-amd64.exe ./cmd/perlcov/
+
+      - name: Create checksums
+        run: |
+          sha256sum perlcov-* > checksums.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          generate_release_notes: true
+          files: |
+            perlcov-linux-amd64
+            perlcov-linux-arm64
+            perlcov-darwin-amd64
+            perlcov-darwin-arm64
+            perlcov-windows-amd64.exe
+            checksums.txt

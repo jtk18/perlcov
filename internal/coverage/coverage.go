@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -19,10 +18,10 @@ type Report struct {
 
 // FileCoverage represents coverage data for a single file
 type FileCoverage struct {
-	Path       string
-	Statements StatementCoverage
-	Branches   BranchCoverage
-	Conditions ConditionCoverage
+	Path        string
+	Statements  StatementCoverage
+	Branches    BranchCoverage
+	Conditions  ConditionCoverage
 	Subroutines SubroutineCoverage
 }
 
@@ -57,11 +56,11 @@ type SubroutineCoverage struct {
 
 // CoverageSummary holds overall coverage statistics
 type CoverageSummary struct {
-	Statement   float64
-	Branch      float64
-	Condition   float64
-	Subroutine  float64
-	TotalFiles  int
+	Statement    float64
+	Branch       float64
+	Condition    float64
+	Subroutine   float64
+	TotalFiles   int
 	CoveredFiles int
 }
 
@@ -444,7 +443,7 @@ func formatCoverage(covered, total int) string {
 }
 
 // GenerateHTML generates an HTML report using the cover command
-func GenerateHTML(coverDir, outputDir string) error {
+func GenerateHTML(coverDir, _ string) error {
 	// Use the cover command to generate HTML
 	cmd := exec.Command("cover", "-report", "html", coverDir)
 	cmd.Stdout = os.Stdout
@@ -452,13 +451,6 @@ func GenerateHTML(coverDir, outputDir string) error {
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("cover command failed: %w", err)
-	}
-
-	// Find the generated HTML file
-	htmlFile := filepath.Join(coverDir, "coverage.html")
-	if _, err := os.Stat(htmlFile); os.IsNotExist(err) {
-		// Try alternate locations
-		htmlFile = filepath.Join(coverDir, "cover.html")
 	}
 
 	return nil
