@@ -37,7 +37,7 @@ Generating HTML reports via the `--html` flag uses the `cover` command, which ca
 ### Building from Source
 
 ```bash
-git clone https://github.com/user/perlcov.git
+git clone https://github.com/jtk18/perlcov.git
 cd perlcov
 go build -o perlcov ./cmd/perlcov/
 
