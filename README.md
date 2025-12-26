@@ -12,19 +12,19 @@ A fast, parallel Perl test coverage tool that wraps [Devel::Cover](https://metac
 
 ## Performance
 
-Benchmarked against [Moo](https://github.com/moose/Moo) (71 test files, 841 tests):
+Benchmarked against [Moo](https://github.com/moose/Moo) (71 test files, 841 tests) on a 16-core machine:
 
 | Method | Time | Notes |
 |--------|------|-------|
 | `prove -l t/*.t` (no coverage) | 14s | Baseline |
 | `prove -l t/*.t` with Devel::Cover | 173s | 12x slower |
-| `perlcov -j 8` | 33s | 5x faster than sequential coverage |
+| `perlcov -j 8` | 30s | **5.8x faster** than sequential coverage |
 
-The parallel execution provides significant speedups, especially on machines with multiple cores.
+The parallel execution provides significant speedups, especially on machines with multiple cores. Coverage data is parsed and merged in Go for fast text report generation.
 
 ### Note on HTML Reports
 
-Generating HTML reports via the `--html` flag uses the `cover` command, which can be slow for large codebases. For 1000+ test files, HTML generation may take several minutes. The text report is generated instantly using direct database parsing.
+Generating HTML reports via the `--html` flag uses the `cover` command, which can be slow for large codebases. For 1000+ test files, HTML generation may take several minutes. The text report is generated instantly using direct parallel parsing of the coverage database.
 
 ## Installation
 
@@ -129,8 +129,19 @@ To disable this behavior, use `--no-rerun-failed`.
 
 1. **Test Discovery**: Recursively finds all `.t` files under the specified test directories
 2. **Parallel Execution**: Runs tests in parallel using Go goroutines, each with Devel::Cover enabled
-3. **Coverage Merging**: Devel::Cover automatically merges coverage data from parallel runs
-4. **Fast Reporting**: Parses the coverage database directly using Perl's `Devel::Cover::DB` module and outputs clean, readable reports
+3. **Fast Merging**: Parses each run's coverage data in parallel using small Perl scripts, then merges results in Go
+4. **Accurate Reporting**: Coverage percentages match the `cover` command output (verified against Moo test suite)
+
+### Accuracy
+
+perlcov produces the same coverage numbers as Devel::Cover's `cover` command:
+
+```
+cover:   Total  80.0%  77.3%  59.1%  82.2%
+perlcov: Total  80.0%  77.4%  59.1%  82.2%
+```
+
+Minor rounding differences may occur due to floating-point calculation order.
 
 ## Contributing
 
