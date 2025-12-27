@@ -158,6 +158,16 @@ func (r *Runner) runSingleTest(testFile string, withCoverage bool) TestResult {
 			coverOpts += fmt.Sprintf(",+inc,%s", absSrc)
 		}
 
+		// Try to derive module name from test filename for targeted coverage
+		if moduleName := extractModuleFromTestFile(testFile); moduleName != "" {
+			// Convert Module::Name to Module/Name.pm for file path matching
+			moduleFile := strings.ReplaceAll(moduleName, "::", "/") + ".pm"
+			// Check if module exists in lib or source directories
+			if moduleExists(moduleFile, cwd, r.SourceDirs) {
+				coverOpts += fmt.Sprintf(",-select,%s", strings.TrimSuffix(moduleFile, ".pm"))
+			}
+		}
+
 		args = append(args, "-MDevel::Cover="+coverOpts)
 	}
 
@@ -194,6 +204,73 @@ func (r *Runner) runSingleTest(testFile string, withCoverage bool) TestResult {
 	}
 
 	return result
+}
+
+// extractModuleFromTestFile attempts to derive a module name from a test filename
+// Pattern: Module-Install-Something.t -> Module::Install::Something
+// Pattern: Module-Install-Something_specifier.t -> Module::Install::Something
+// Pattern: Module.t -> Module
+// Pattern: Module_specifier.t -> Module
+// Returns empty string if the pattern doesn't match
+func extractModuleFromTestFile(testFile string) string {
+	// Get the base filename without directory
+	base := filepath.Base(testFile)
+
+	// Strip .t extension
+	if !strings.HasSuffix(base, ".t") {
+		return ""
+	}
+	name := strings.TrimSuffix(base, ".t")
+
+	// Skip numbered test files (e.g., 00-load.t, 01-basic.t)
+	if len(name) > 0 && name[0] >= '0' && name[0] <= '9' {
+		return ""
+	}
+
+	// Strip anything from the first underscore onwards (specifier portion)
+	if idx := strings.Index(name, "_"); idx != -1 {
+		name = name[:idx]
+	}
+
+	// First character must be uppercase (Perl module naming convention)
+	if len(name) == 0 || name[0] < 'A' || name[0] > 'Z' {
+		return ""
+	}
+
+	// Replace hyphens with :: to form module name
+	moduleName := strings.ReplaceAll(name, "-", "::")
+
+	return moduleName
+}
+
+// moduleExists checks if a module file exists in cwd, lib, or any of the source directories
+func moduleExists(moduleFile, cwd string, sourceDirs []string) bool {
+	// Check in cwd first
+	cwdPath := filepath.Join(cwd, moduleFile)
+	if _, err := os.Stat(cwdPath); err == nil {
+		return true
+	}
+
+	// Check in lib directory
+	libPath := filepath.Join(cwd, "lib", moduleFile)
+	if _, err := os.Stat(libPath); err == nil {
+		return true
+	}
+
+	// Check in source directories
+	for _, src := range sourceDirs {
+		var srcPath string
+		if filepath.IsAbs(src) {
+			srcPath = filepath.Join(src, moduleFile)
+		} else {
+			srcPath = filepath.Join(cwd, src, moduleFile)
+		}
+		if _, err := os.Stat(srcPath); err == nil {
+			return true
+		}
+	}
+
+	return false
 }
 
 // containsTAPFailure checks if the output contains TAP failure indicators
