@@ -158,6 +158,14 @@ func (r *Runner) runSingleTest(testFile string, withCoverage bool) TestResult {
 			coverOpts += fmt.Sprintf(",+inc,%s", absSrc)
 		}
 
+		// Try to derive module name from test filename for targeted coverage
+		if moduleName := extractModuleFromTestFile(testFile); moduleName != "" {
+			// Use -select to limit coverage to the module under test
+			// Convert Module::Name to Module/Name for file path matching
+			modulePattern := strings.ReplaceAll(moduleName, "::", "/")
+			coverOpts += fmt.Sprintf(",-select,%s", modulePattern)
+		}
+
 		args = append(args, "-MDevel::Cover="+coverOpts)
 	}
 
@@ -194,6 +202,41 @@ func (r *Runner) runSingleTest(testFile string, withCoverage bool) TestResult {
 	}
 
 	return result
+}
+
+// extractModuleFromTestFile attempts to derive a module name from a test filename
+// Pattern: Module-Install-Something.t -> Module::Install::Something
+// Pattern: Module-Install-Something_specifier.t -> Module::Install::Something
+// Returns empty string if the pattern doesn't match
+func extractModuleFromTestFile(testFile string) string {
+	// Get the base filename without directory
+	base := filepath.Base(testFile)
+
+	// Strip .t extension
+	if !strings.HasSuffix(base, ".t") {
+		return ""
+	}
+	name := strings.TrimSuffix(base, ".t")
+
+	// Strip anything from the first underscore onwards (specifier portion)
+	if idx := strings.Index(name, "_"); idx != -1 {
+		name = name[:idx]
+	}
+
+	// Must contain at least one hyphen to be a module pattern
+	if !strings.Contains(name, "-") {
+		return ""
+	}
+
+	// First character must be uppercase (Perl module naming convention)
+	if len(name) == 0 || name[0] < 'A' || name[0] > 'Z' {
+		return ""
+	}
+
+	// Replace hyphens with :: to form module name
+	moduleName := strings.ReplaceAll(name, "-", "::")
+
+	return moduleName
 }
 
 // containsTAPFailure checks if the output contains TAP failure indicators
