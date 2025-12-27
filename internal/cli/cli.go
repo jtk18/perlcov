@@ -26,6 +26,7 @@ type Config struct {
 	ShowVersion   bool
 	IgnoreDirs    []string
 	NoSelect      bool
+	Normalize     string // Comma-separated normalization modes
 }
 
 // Version information
@@ -65,6 +66,7 @@ func Run(args []string) error {
 	fs.Var(&ignoreDirs, "ignore", "Directories to ignore for coverage (can be specified multiple times)")
 	fs.Var(&sourceDirs, "source", "Source directories to measure coverage (default: lib)")
 	fs.BoolVar(&cfg.NoSelect, "no-select", false, "Disable -select optimization (for benchmarking)")
+	fs.StringVar(&cfg.Normalize, "normalize", "", "Normalize coverage metrics (comma-separated modes: conditions-to-branches, subroutines-to-statements, sonarqube, simple)")
 
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `perlcov - Fast Perl test coverage tool
@@ -85,6 +87,9 @@ Examples:
   perlcov --html                    # Generate HTML report (slow)
   perlcov --no-rerun-failed         # Don't rerun failed tests without coverage
   perlcov --no-select               # Disable -select optimization (for benchmarking)
+  perlcov --normalize=conditions-to-branches   # Merge conditions into branches
+  perlcov --normalize=sonarqube     # Use SonarQube-style coverage metrics
+  perlcov --normalize=simple        # Show only statement coverage
   perlcov t/unit/                   # Run tests in specific directory
   perlcov t/foo.t t/bar.t           # Run specific test files
 
@@ -169,6 +174,15 @@ func runCoverage(cfg *Config) error {
 	report, err := coverage.ParseCoverageDB(cfg.CoverDir)
 	if err != nil {
 		return fmt.Errorf("failed to parse coverage: %w", err)
+	}
+
+	// Apply normalization if specified
+	if cfg.Normalize != "" {
+		normConfig, err := coverage.ParseNormalizationModes(cfg.Normalize)
+		if err != nil {
+			return fmt.Errorf("invalid --normalize value: %w", err)
+		}
+		report.Normalize(normConfig)
 	}
 
 	coverage.PrintReport(report, cfg.Verbose)

@@ -84,7 +84,31 @@ perlcov -v
 | `-o <dir>` | Output directory for reports |
 | `--source <dir>` | Source directories to measure (default: `lib`) |
 | `--ignore <dir>` | Directories to ignore for coverage |
+| `--no-select` | Disable `-select` optimization (for benchmarking) |
+| `--normalize <modes>` | Normalize coverage metrics (see below) |
 | `--version` | Show version information |
+
+### Coverage Normalization
+
+The `--normalize` flag transforms coverage metrics to match output formats expected by other tools like SonarQube or JaCoCo. Available modes (can be combined with commas):
+
+| Mode | Description |
+|------|-------------|
+| `conditions-to-branches` | Merge condition coverage into branch coverage |
+| `subroutines-to-statements` | Merge subroutine coverage into statement coverage |
+| `sonarqube` | SonarQube-style normalization (conditions→branches, shows combined coverage) |
+| `simple` | Show only statement coverage |
+
+```bash
+# Merge conditions into branches (like SonarQube)
+perlcov --normalize=conditions-to-branches
+
+# Apply full SonarQube-style normalization
+perlcov --normalize=sonarqube
+
+# Combine multiple normalizations
+perlcov --normalize=conditions-to-branches,subroutines-to-statements
+```
 
 ## Example Output
 
