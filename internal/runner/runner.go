@@ -164,7 +164,14 @@ func (r *Runner) runSingleTest(testFile string, withCoverage bool) TestResult {
 			moduleFile := strings.ReplaceAll(moduleName, "::", "/") + ".pm"
 			// Check if module exists in lib or source directories
 			if moduleExists(moduleFile, cwd, r.SourceDirs) {
-				coverOpts += fmt.Sprintf(",-select,%s", strings.TrimSuffix(moduleFile, ".pm"))
+				// Use -ignore to exclude lib/ files, then -select to include just
+				// the target module. The order matters: -ignore must come before
+				// -select for Devel::Cover to properly filter.
+				modulePattern := strings.TrimSuffix(moduleFile, ".pm")
+				coverOpts += fmt.Sprintf(",-ignore,lib/,-select,%s", modulePattern)
+				if r.Verbose {
+					fmt.Printf("  [select] %s -> %s\n", testFile, moduleName)
+				}
 			}
 		}
 
