@@ -25,3 +25,6 @@ go.work
 
 # Devel::Cover database
 cover_db/
+
+# Local test project for development
+testproject/
