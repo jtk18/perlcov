@@ -27,16 +27,18 @@ type Runner struct {
 	Jobs         int
 	Verbose      bool
 	SourceDirs   []string
+	NoSelect     bool
 }
 
 // New creates a new Runner
-func New(includePaths []string, coverDir string, jobs int, verbose bool, sourceDirs []string) *Runner {
+func New(includePaths []string, coverDir string, jobs int, verbose bool, sourceDirs []string, noSelect bool) *Runner {
 	return &Runner{
 		IncludePaths: includePaths,
 		CoverDir:     coverDir,
 		Jobs:         jobs,
 		Verbose:      verbose,
 		SourceDirs:   sourceDirs,
+		NoSelect:     noSelect,
 	}
 }
 
@@ -159,18 +161,21 @@ func (r *Runner) runSingleTest(testFile string, withCoverage bool) TestResult {
 		}
 
 		// Try to derive module name from test filename for targeted coverage
-		if moduleName := extractModuleFromTestFile(testFile); moduleName != "" {
-			// Convert Module::Name to Module/Name.pm for file path matching
-			moduleFile := strings.ReplaceAll(moduleName, "::", "/") + ".pm"
-			// Check if module exists in lib or source directories
-			if moduleExists(moduleFile, cwd, r.SourceDirs) {
-				// Use -ignore to exclude lib/ files, then -select to include just
-				// the target module. The order matters: -ignore must come before
-				// -select for Devel::Cover to properly filter.
-				modulePattern := strings.TrimSuffix(moduleFile, ".pm")
-				coverOpts += fmt.Sprintf(",-ignore,lib/,-select,%s", modulePattern)
-				if r.Verbose {
-					fmt.Printf("  [select] %s -> %s\n", testFile, moduleName)
+		// Skip this optimization if NoSelect is enabled (for benchmarking)
+		if !r.NoSelect {
+			if moduleName := extractModuleFromTestFile(testFile); moduleName != "" {
+				// Convert Module::Name to Module/Name.pm for file path matching
+				moduleFile := strings.ReplaceAll(moduleName, "::", "/") + ".pm"
+				// Check if module exists in lib or source directories
+				if moduleExists(moduleFile, cwd, r.SourceDirs) {
+					// Use -ignore to exclude lib/ files, then -select to include just
+					// the target module. The order matters: -ignore must come before
+					// -select for Devel::Cover to properly filter.
+					modulePattern := strings.TrimSuffix(moduleFile, ".pm")
+					coverOpts += fmt.Sprintf(",-ignore,lib/,-select,%s", modulePattern)
+					if r.Verbose {
+						fmt.Printf("  [select] %s -> %s\n", testFile, moduleName)
+					}
 				}
 			}
 		}

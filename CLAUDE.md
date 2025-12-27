@@ -124,6 +124,16 @@ This means:
 - Other lib modules won't be instrumented, reducing overhead
 - Non-matching tests (numbered, lowercase) run with default coverage behavior
 
+### Disabling the Optimization
+
+For benchmarking purposes, you can disable the `-select` optimization with:
+
+```bash
+./perlcov --no-select
+```
+
+This runs all tests without the targeted coverage filtering, which is useful for comparing performance with and without the optimization.
+
 ## Known Issues
 
 1. **Coverage parsing**: perlcov's internal coverage parser may not correctly read all Devel::Cover database formats. Use the `--html` flag or `cover` command for accurate reports.

@@ -25,6 +25,7 @@ type Config struct {
 	OutputDir     string
 	ShowVersion   bool
 	IgnoreDirs    []string
+	NoSelect      bool
 }
 
 // Version information
@@ -63,6 +64,7 @@ func Run(args []string) error {
 	fs.BoolVar(&cfg.ShowVersion, "version", false, "Show version information")
 	fs.Var(&ignoreDirs, "ignore", "Directories to ignore for coverage (can be specified multiple times)")
 	fs.Var(&sourceDirs, "source", "Source directories to measure coverage (default: lib)")
+	fs.BoolVar(&cfg.NoSelect, "no-select", false, "Disable -select optimization (for benchmarking)")
 
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `perlcov - Fast Perl test coverage tool
@@ -82,6 +84,7 @@ Examples:
   perlcov -I lib -I local/lib       # Add include paths
   perlcov --html                    # Generate HTML report (slow)
   perlcov --no-rerun-failed         # Don't rerun failed tests without coverage
+  perlcov --no-select               # Disable -select optimization (for benchmarking)
   perlcov t/unit/                   # Run tests in specific directory
   perlcov t/foo.t t/bar.t           # Run specific test files
 
@@ -147,7 +150,7 @@ func runCoverage(cfg *Config) error {
 	}
 
 	// Run tests with coverage
-	r := runner.New(cfg.IncludePaths, cfg.CoverDir, cfg.Jobs, cfg.Verbose, cfg.SourceDirs)
+	r := runner.New(cfg.IncludePaths, cfg.CoverDir, cfg.Jobs, cfg.Verbose, cfg.SourceDirs, cfg.NoSelect)
 	results := r.RunTests(testFiles)
 
 	// Print test results
