@@ -218,6 +218,11 @@ func extractModuleFromTestFile(testFile string) string {
 	}
 	name := strings.TrimSuffix(base, ".t")
 
+	// Skip numbered test files (e.g., 00-load.t, 01-basic.t)
+	if len(name) > 0 && name[0] >= '0' && name[0] <= '9' {
+		return ""
+	}
+
 	// Strip anything from the first underscore onwards (specifier portion)
 	if idx := strings.Index(name, "_"); idx != -1 {
 		name = name[:idx]

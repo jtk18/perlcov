@@ -49,6 +49,11 @@ func TestExtractModuleFromTestFile(t *testing.T) {
 			expected: "",
 		},
 		{
+			name:     "non-matching numbered test with multiple digits",
+			testFile: "123-some-test.t",
+			expected: "",
+		},
+		{
 			name:     "non-matching lowercase hyphenated",
 			testFile: "my-test-file.t",
 			expected: "",
