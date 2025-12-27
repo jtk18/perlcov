@@ -160,10 +160,12 @@ func (r *Runner) runSingleTest(testFile string, withCoverage bool) TestResult {
 
 		// Try to derive module name from test filename for targeted coverage
 		if moduleName := extractModuleFromTestFile(testFile); moduleName != "" {
-			// Use -select to limit coverage to the module under test
-			// Convert Module::Name to Module/Name for file path matching
-			modulePattern := strings.ReplaceAll(moduleName, "::", "/")
-			coverOpts += fmt.Sprintf(",-select,%s", modulePattern)
+			// Convert Module::Name to Module/Name.pm for file path matching
+			moduleFile := strings.ReplaceAll(moduleName, "::", "/") + ".pm"
+			// Check if module exists in lib or source directories
+			if moduleExists(moduleFile, cwd, r.SourceDirs) {
+				coverOpts += fmt.Sprintf(",-select,%s", strings.TrimSuffix(moduleFile, ".pm"))
+			}
 		}
 
 		args = append(args, "-MDevel::Cover="+coverOpts)
@@ -207,6 +209,8 @@ func (r *Runner) runSingleTest(testFile string, withCoverage bool) TestResult {
 // extractModuleFromTestFile attempts to derive a module name from a test filename
 // Pattern: Module-Install-Something.t -> Module::Install::Something
 // Pattern: Module-Install-Something_specifier.t -> Module::Install::Something
+// Pattern: Module.t -> Module
+// Pattern: Module_specifier.t -> Module
 // Returns empty string if the pattern doesn't match
 func extractModuleFromTestFile(testFile string) string {
 	// Get the base filename without directory
@@ -228,11 +232,6 @@ func extractModuleFromTestFile(testFile string) string {
 		name = name[:idx]
 	}
 
-	// Must contain at least one hyphen to be a module pattern
-	if !strings.Contains(name, "-") {
-		return ""
-	}
-
 	// First character must be uppercase (Perl module naming convention)
 	if len(name) == 0 || name[0] < 'A' || name[0] > 'Z' {
 		return ""
@@ -242,6 +241,36 @@ func extractModuleFromTestFile(testFile string) string {
 	moduleName := strings.ReplaceAll(name, "-", "::")
 
 	return moduleName
+}
+
+// moduleExists checks if a module file exists in cwd, lib, or any of the source directories
+func moduleExists(moduleFile, cwd string, sourceDirs []string) bool {
+	// Check in cwd first
+	cwdPath := filepath.Join(cwd, moduleFile)
+	if _, err := os.Stat(cwdPath); err == nil {
+		return true
+	}
+
+	// Check in lib directory
+	libPath := filepath.Join(cwd, "lib", moduleFile)
+	if _, err := os.Stat(libPath); err == nil {
+		return true
+	}
+
+	// Check in source directories
+	for _, src := range sourceDirs {
+		var srcPath string
+		if filepath.IsAbs(src) {
+			srcPath = filepath.Join(src, moduleFile)
+		} else {
+			srcPath = filepath.Join(cwd, src, moduleFile)
+		}
+		if _, err := os.Stat(srcPath); err == nil {
+			return true
+		}
+	}
+
+	return false
 }
 
 // containsTAPFailure checks if the output contains TAP failure indicators

@@ -39,6 +39,16 @@ func TestExtractModuleFromTestFile(t *testing.T) {
 			expected: "App::Foo::Bar::Baz::Qux",
 		},
 		{
+			name:     "single word module",
+			testFile: "Module.t",
+			expected: "Module",
+		},
+		{
+			name:     "single word module with specifier",
+			testFile: "Module_specifier.t",
+			expected: "Module",
+		},
+		{
 			name:     "non-matching simple test",
 			testFile: "basic.t",
 			expected: "",
