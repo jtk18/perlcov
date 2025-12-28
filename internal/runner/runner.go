@@ -28,10 +28,11 @@ type Runner struct {
 	Verbose      bool
 	SourceDirs   []string
 	NoSelect     bool
+	JSONMerge    bool // Use JSON format for coverage data (enables pure Go merging)
 }
 
 // New creates a new Runner
-func New(includePaths []string, coverDir string, jobs int, verbose bool, sourceDirs []string, noSelect bool) *Runner {
+func New(includePaths []string, coverDir string, jobs int, verbose bool, sourceDirs []string, noSelect bool, jsonMerge bool) *Runner {
 	return &Runner{
 		IncludePaths: includePaths,
 		CoverDir:     coverDir,
@@ -39,6 +40,7 @@ func New(includePaths []string, coverDir string, jobs int, verbose bool, sourceD
 		Verbose:      verbose,
 		SourceDirs:   sourceDirs,
 		NoSelect:     noSelect,
+		JSONMerge:    jsonMerge,
 	}
 }
 

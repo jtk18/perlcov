@@ -28,3 +28,7 @@ cover_db/
 
 # Local test project for development
 testproject/
+
+# no other .files or .dirs
+.*
+

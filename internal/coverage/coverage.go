@@ -160,7 +160,8 @@ type runCoverageData struct {
 }
 
 // ParseCoverageDB parses the Devel::Cover database and returns a report
-func ParseCoverageDB(coverDir string) (*Report, error) {
+// If jsonMerge is true, uses pure Go to read JSON files and merge
+func ParseCoverageDB(coverDir string, jsonMerge bool) (*Report, error) {
 	// Check if cover_db exists
 	if _, err := os.Stat(coverDir); os.IsNotExist(err) {
 		return nil, fmt.Errorf("coverage directory %s does not exist", coverDir)
@@ -171,8 +172,27 @@ func ParseCoverageDB(coverDir string) (*Report, error) {
 		return nil, fmt.Errorf("no coverage runs found in %s", runsDir)
 	}
 
-	// Parse all runs at once - Perl script handles the merging
-	data, err := parseAllRuns(coverDir)
+	// Detect file format by checking first run's cover file
+	isJSON := detectJSONFormat(runsDir)
+
+	// If jsonMerge is requested and files aren't JSON, convert them first
+	if jsonMerge && !isJSON {
+		if err := convertToJSON(coverDir); err != nil {
+			return nil, fmt.Errorf("failed to convert to JSON: %w", err)
+		}
+		isJSON = true // Now they're JSON
+	}
+
+	var data *runCoverageData
+	var err error
+
+	if isJSON {
+		// Use pure Go to read JSON files and merge
+		data, err = parseAllRunsJSON(coverDir)
+	} else {
+		// Use Perl to merge Storable/Sereal files
+		data, err = parseAllRuns(coverDir)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -220,6 +240,119 @@ func ParseCoverageDB(coverDir string) (*Report, error) {
 	calculateSummary(report)
 
 	return report, nil
+}
+
+// convertToJSON converts coverage files from Sereal/Storable to JSON format
+// This uses Devel::Cover's IO module to read and JSON::PP (core) to write
+func convertToJSON(coverDir string) error {
+	script := `
+use strict;
+use warnings;
+use JSON::PP;
+
+my $json = JSON::PP->new->utf8->canonical;
+my $cover_db = $ARGV[0];
+
+sub convert_file {
+    my ($file) = @_;
+
+    # Skip if already JSON
+    open my $fh, '<:raw', $file or return;
+    my $first = '';
+    read($fh, $first, 1);
+    close $fh;
+    return if $first eq '{';
+
+    # Read with Devel::Cover::DB::IO (auto-detects format)
+    my $data;
+    eval {
+        require Devel::Cover::DB::IO;
+        my $io = Devel::Cover::DB::IO->new;
+        $data = $io->read($file);
+    };
+    return unless $data && ref $data;
+
+    # Write as JSON using JSON::PP
+    open my $out, '>:raw', $file or die "Cannot write $file: $!";
+    print $out $json->encode($data);
+    close $out;
+    warn "Converted $file to JSON\n" if $ENV{PERLCOV_VERBOSE};
+}
+
+# Convert run files
+for my $run_dir (glob("$cover_db/runs/*")) {
+    next unless -d $run_dir;
+    for my $file (glob("$run_dir/cover.*"), glob("$run_dir/*")) {
+        next if -d $file || $file =~ /\.lock$/;
+        convert_file($file);
+    }
+}
+
+# Convert structure files
+for my $file (glob("$cover_db/structure/*")) {
+    next if -d $file || $file =~ /\.lock$/;
+    convert_file($file);
+}
+
+print "ok\n";
+`
+
+	cmd := exec.Command("perl", "-e", script, coverDir)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to convert coverage to JSON: %w\nStderr: %s", err, stderr.String())
+	}
+
+	return nil
+}
+
+// detectJSONFormat checks if the coverage files are in JSON format
+func detectJSONFormat(runsDir string) bool {
+	entries, err := os.ReadDir(runsDir)
+	if err != nil {
+		return false
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		runDir := filepath.Join(runsDir, entry.Name())
+		files, err := os.ReadDir(runDir)
+		if err != nil {
+			continue
+		}
+
+		for _, f := range files {
+			if f.IsDir() || strings.HasSuffix(f.Name(), ".lock") {
+				continue
+			}
+			if !strings.HasPrefix(f.Name(), "cover.") {
+				continue
+			}
+
+			// Read first few bytes to detect format
+			coverPath := filepath.Join(runDir, f.Name())
+			file, err := os.Open(coverPath)
+			if err != nil {
+				continue
+			}
+			defer file.Close()
+
+			buf := make([]byte, 1)
+			n, err := file.Read(buf)
+			if err != nil || n == 0 {
+				continue
+			}
+
+			// JSON files start with '{'
+			return buf[0] == '{'
+		}
+	}
+
+	return false
 }
 
 // parseAllRuns parses all run directories and merges coverage data
@@ -403,6 +536,322 @@ print JSON::PP->new->utf8->encode({ files => \@files });
 	}
 
 	return &data, nil
+}
+
+// singleRunData represents coverage data from a single run (JSON format)
+type singleRunData struct {
+	File      string         `json:"file"`
+	Statement []int          `json:"statement"` // hit counts per line index
+	Branch    [][2]int       `json:"branch"`    // [true_hits, false_hits] per branch
+	Condition [][]int        `json:"condition"` // hits per condition state
+	Sub       []int          `json:"subroutine"`
+}
+
+// jsonRunFile represents the JSON format Devel::Cover writes when DEVEL_COVER_DB_FORMAT=JSON
+type jsonRunFile struct {
+	Runs map[string]struct {
+		Count map[string]struct {
+			Statement  []int       `json:"statement"`
+			Branch     [][]float64 `json:"branch"`    // float64 because Devel::Cover may output e.g. 25.0
+			Condition  [][]float64 `json:"condition"` // float64 for consistency
+			Subroutine []int       `json:"subroutine"`
+		} `json:"count"`
+	} `json:"runs"`
+}
+
+// jsonStructureFile represents the structure JSON format
+type jsonStructureFile struct {
+	File      string `json:"file"`
+	Statement []int  `json:"statement"`
+}
+
+// parseAllRunsJSON reads JSON coverage files directly (no Perl required)
+// This works when DEVEL_COVER_DB_FORMAT=JSON is set during test runs
+func parseAllRunsJSON(coverDir string) (*runCoverageData, error) {
+	runsDir := filepath.Join(coverDir, "runs")
+	structDir := filepath.Join(coverDir, "structure")
+
+	// Load structure files for line number mapping
+	structures := make(map[string][]int)
+	structEntries, err := os.ReadDir(structDir)
+	if err == nil {
+		for _, entry := range structEntries {
+			if entry.IsDir() || strings.HasSuffix(entry.Name(), ".lock") {
+				continue
+			}
+			structPath := filepath.Join(structDir, entry.Name())
+			data, err := os.ReadFile(structPath)
+			if err != nil {
+				continue
+			}
+			var structFile jsonStructureFile
+			if err := json.Unmarshal(data, &structFile); err != nil {
+				continue
+			}
+			if structFile.File != "" {
+				structures[structFile.File] = structFile.Statement
+			}
+		}
+	}
+
+	// Find and read all run directories
+	runEntries, err := os.ReadDir(runsDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read runs directory: %w", err)
+	}
+
+	var allRuns [][]singleRunData
+
+	for _, entry := range runEntries {
+		if !entry.IsDir() {
+			continue
+		}
+		runDir := filepath.Join(runsDir, entry.Name())
+
+		// Find the cover.* file in this run directory
+		files, err := os.ReadDir(runDir)
+		if err != nil {
+			continue
+		}
+
+		for _, f := range files {
+			if f.IsDir() || strings.HasSuffix(f.Name(), ".lock") {
+				continue
+			}
+			if !strings.HasPrefix(f.Name(), "cover.") {
+				continue
+			}
+
+			coverPath := filepath.Join(runDir, f.Name())
+			data, err := os.ReadFile(coverPath)
+			if err != nil {
+				continue
+			}
+
+			var runFile jsonRunFile
+			if err := json.Unmarshal(data, &runFile); err != nil {
+				continue
+			}
+
+			// Extract coverage data from all runs in this file
+			for _, run := range runFile.Runs {
+				var runData []singleRunData
+				for file, counts := range run.Count {
+					rd := singleRunData{
+						File:      file,
+						Statement: counts.Statement,
+						Sub:       counts.Subroutine,
+					}
+
+					// Convert branch format (float64 -> int)
+					for _, b := range counts.Branch {
+						if len(b) >= 2 {
+							rd.Branch = append(rd.Branch, [2]int{int(b[0]), int(b[1])})
+						} else {
+							rd.Branch = append(rd.Branch, [2]int{0, 0})
+						}
+					}
+
+					// Convert condition format (float64 -> int)
+					for _, c := range counts.Condition {
+						cond := make([]int, len(c))
+						for i, v := range c {
+							cond[i] = int(v)
+						}
+						rd.Condition = append(rd.Condition, cond)
+					}
+
+					runData = append(runData, rd)
+				}
+				if len(runData) > 0 {
+					allRuns = append(allRuns, runData)
+				}
+			}
+			break // Only need one cover file per run
+		}
+	}
+
+	// Merge all runs in Go
+	return mergeRunsGo(allRuns, structures)
+}
+
+// mergeRunsGo merges coverage data from multiple runs in Go
+func mergeRunsGo(allRuns [][]singleRunData, structures map[string][]int) (*runCoverageData, error) {
+	// Merged data per file
+	type mergedFile struct {
+		stmt   []int
+		branch [][2]int
+		cond   [][]int
+		sub    []int
+	}
+
+	merged := make(map[string]*mergedFile)
+
+	// Merge all runs
+	for _, runs := range allRuns {
+		for _, r := range runs {
+			m, exists := merged[r.File]
+			if !exists {
+				m = &mergedFile{
+					stmt:   make([]int, len(r.Statement)),
+					branch: make([][2]int, len(r.Branch)),
+					cond:   make([][]int, len(r.Condition)),
+					sub:    make([]int, len(r.Sub)),
+				}
+				// Initialize condition slices
+				for i, c := range r.Condition {
+					m.cond[i] = make([]int, len(c))
+				}
+				merged[r.File] = m
+			}
+
+			// Extend slices if needed
+			for len(m.stmt) < len(r.Statement) {
+				m.stmt = append(m.stmt, 0)
+			}
+			for len(m.branch) < len(r.Branch) {
+				m.branch = append(m.branch, [2]int{0, 0})
+			}
+			for len(m.sub) < len(r.Sub) {
+				m.sub = append(m.sub, 0)
+			}
+			for len(m.cond) < len(r.Condition) {
+				m.cond = append(m.cond, nil)
+			}
+
+			// Add statement counts
+			for i, v := range r.Statement {
+				m.stmt[i] += v
+			}
+
+			// Add branch counts
+			for i, b := range r.Branch {
+				m.branch[i][0] += b[0]
+				m.branch[i][1] += b[1]
+			}
+
+			// Add condition counts
+			for i, c := range r.Condition {
+				if m.cond[i] == nil {
+					m.cond[i] = make([]int, len(c))
+				}
+				for len(m.cond[i]) < len(c) {
+					m.cond[i] = append(m.cond[i], 0)
+				}
+				for j, v := range c {
+					m.cond[i][j] += v
+				}
+			}
+
+			// Add subroutine counts
+			for i, v := range r.Sub {
+				m.sub[i] += v
+			}
+		}
+	}
+
+	// Convert to output format
+	var files []struct {
+		Path      string `json:"path"`
+		Statement struct {
+			Lines   map[string]int `json:"lines"`
+			Covered int            `json:"covered"`
+			Total   int            `json:"total"`
+		} `json:"statement"`
+		Branch struct {
+			Covered int `json:"covered"`
+			Total   int `json:"total"`
+		} `json:"branch"`
+		Condition struct {
+			Covered int `json:"covered"`
+			Total   int `json:"total"`
+		} `json:"condition"`
+		Subroutine struct {
+			Covered int `json:"covered"`
+			Total   int `json:"total"`
+		} `json:"subroutine"`
+	}
+
+	for file, m := range merged {
+		f := struct {
+			Path      string `json:"path"`
+			Statement struct {
+				Lines   map[string]int `json:"lines"`
+				Covered int            `json:"covered"`
+				Total   int            `json:"total"`
+			} `json:"statement"`
+			Branch struct {
+				Covered int `json:"covered"`
+				Total   int `json:"total"`
+			} `json:"branch"`
+			Condition struct {
+				Covered int `json:"covered"`
+				Total   int `json:"total"`
+			} `json:"condition"`
+			Subroutine struct {
+				Covered int `json:"covered"`
+				Total   int `json:"total"`
+			} `json:"subroutine"`
+		}{
+			Path: file,
+		}
+		f.Statement.Lines = make(map[string]int)
+
+		// Get line mappings from structure
+		stmtLines := structures[file]
+
+		// Count statement coverage
+		f.Statement.Total = len(m.stmt)
+		for i, hits := range m.stmt {
+			line := i + 1 // Default: 1-indexed
+			if i < len(stmtLines) {
+				line = stmtLines[i]
+			}
+			if hits > 0 {
+				f.Statement.Covered++
+			} else {
+				f.Statement.Lines[fmt.Sprintf("%d", line)] = 0
+			}
+		}
+
+		// Count branch coverage
+		for _, b := range m.branch {
+			f.Branch.Total += 2
+			if b[0] > 0 {
+				f.Branch.Covered++
+			}
+			if b[1] > 0 {
+				f.Branch.Covered++
+			}
+		}
+
+		// Count condition coverage
+		for _, c := range m.cond {
+			for _, hits := range c {
+				f.Condition.Total++
+				if hits > 0 {
+					f.Condition.Covered++
+				}
+			}
+		}
+
+		// Count subroutine coverage
+		for _, hits := range m.sub {
+			f.Subroutine.Total++
+			if hits > 0 {
+				f.Subroutine.Covered++
+			}
+		}
+
+		files = append(files, f)
+	}
+
+	// Sort files by path for consistent output
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].Path < files[j].Path
+	})
+
+	return &runCoverageData{Files: files}, nil
 }
 
 // calculateSummary calculates final coverage percentages and summary
