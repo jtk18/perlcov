@@ -134,9 +134,31 @@ For benchmarking purposes, you can disable the `-select` optimization with:
 
 This runs all tests without the targeted coverage filtering, which is useful for comparing performance with and without the optimization.
 
-## Known Issues
+## Coverage Normalization
 
-1. **Coverage parsing**: perlcov's internal coverage parser may not correctly read all Devel::Cover database formats. Use the `--html` flag or `cover` command for accurate reports.
+The `--normalize` flag transforms coverage metrics to match formats expected by other tools (SonarQube, JaCoCo, etc.):
+
+```bash
+# Merge conditions into branches (like SonarQube/JaCoCo)
+./perlcov --normalize=conditions-to-branches
+
+# Apply SonarQube-style normalization (conditions→branches + combined coverage)
+./perlcov --normalize=sonarqube
+
+# Show only statement coverage
+./perlcov --normalize=simple
+
+# Combine multiple normalizations
+./perlcov --normalize=conditions-to-branches,subroutines-to-statements
+```
+
+Available normalization modes:
+- `conditions-to-branches`: Merge condition coverage into branch coverage
+- `subroutines-to-statements`: Merge subroutine coverage into statement coverage
+- `sonarqube`: SonarQube-style (conditions→branches, displays combined coverage)
+- `simple`: Collapse to just statement coverage
+
+When normalization is applied, the report shows a note like `[normalized: conditions→branches]` and hides the absorbed columns.
 
 ## Go Test Commands
 
