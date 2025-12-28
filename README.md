@@ -12,15 +12,43 @@ A fast, parallel Perl test coverage tool that wraps [Devel::Cover](https://metac
 
 ## Performance
 
-Benchmarked against [Moo](https://github.com/moose/Moo) (71 test files, 841 tests) on a 16-core machine:
+Benchmarked against [Moo](https://github.com/moose/Moo) (71 test files, 841 tests) on GitHub Actions (4 cores):
 
-| Method | Time | Notes |
-|--------|------|-------|
-| `prove -l t/*.t` (no coverage) | 14s | Baseline |
-| `prove -l t/*.t` with Devel::Cover | 173s | 12x slower |
-| `perlcov -j 8` | 30s | **5.8x faster** than sequential coverage |
+| Method | Time | Speedup |
+|--------|------|---------|
+| Baseline (no coverage) | 4.7s | - |
+| Sequential Devel::Cover + Storable | 37.3s | 1x |
+| Sequential Devel::Cover + JSON::PP | 46.8s | 0.8x (slowest) |
+| Sequential Devel::Cover + JSON::XS | 36.9s | 1x |
+| Sequential Devel::Cover + Sereal | 37.1s | 1x |
+| **perlcov -j 4** | **14.8s** | **2.5x faster** |
 
-The parallel execution provides significant speedups, especially on machines with multiple cores. Coverage data is parsed and merged in Go for fast text report generation.
+Key findings:
+- **perlcov provides 2.5x speedup** over sequential Devel::Cover
+- **JSON::PP is significantly slower** than other formats (use `Cpanel::JSON::XS` or `Sereal`)
+- Storable, JSON::XS, and Sereal have similar performance
+
+### Performance Tips
+
+Avoid using `JSON::MaybeXS` without `Cpanel::JSON::XS` installed, as pure-Perl JSON::PP is ~25% slower than Storable. For best performance, install one of:
+
+```bash
+cpan Cpanel::JSON::XS   # Fast JSON (recommended)
+cpan Sereal             # Fast binary format
+```
+
+When JSON::MaybeXS with an XS backend is installed, perlcov automatically detects JSON-formatted coverage data and uses pure Go parsing for the merge step.
+
+### Run Benchmarks Yourself
+
+A Dockerfile is provided to run reproducible benchmarks in a clean environment:
+
+```bash
+docker build -f Dockerfile.benchmark -t perlcov-benchmark .
+docker run --rm perlcov-benchmark
+```
+
+This runs the full benchmark suite against the Moo test suite, testing Storable, JSON::PP, JSON::XS, and Sereal formats.
 
 ### Note on HTML Reports
 
@@ -85,6 +113,7 @@ perlcov -v
 | `--source <dir>` | Source directories to measure (default: `lib`) |
 | `--ignore <dir>` | Directories to ignore for coverage |
 | `--no-select` | Disable `-select` optimization (for benchmarking) |
+| `--json-merge` | Force JSON format for coverage data (enables pure Go merging) |
 | `--normalize <modes>` | Normalize coverage metrics (see below) |
 | `--version` | Show version information |
 
@@ -153,8 +182,16 @@ To disable this behavior, use `--no-rerun-failed`.
 
 1. **Test Discovery**: Recursively finds all `.t` files under the specified test directories
 2. **Parallel Execution**: Runs tests in parallel using Go goroutines, each with Devel::Cover enabled
-3. **Fast Merging**: Parses each run's coverage data in parallel using small Perl scripts, then merges results in Go
+3. **Fast Merging**: Coverage databases are read directly in Go (JSON format) and merged without spawning Perl processes
 4. **Accurate Reporting**: Coverage percentages match the `cover` command output (verified against Moo test suite)
+
+### JSON Merge Mode
+
+perlcov automatically detects when coverage files are in JSON format and uses pure Go parsing for the merge step. This happens automatically when `JSON::MaybeXS` is installed.
+
+The `--json-merge` flag converts Sereal/Storable coverage databases to JSON format after tests complete, then merges them in pure Go. This is useful when:
+- You have `Sereal` installed (which takes priority over JSON by default)
+- You want faster merging without installing `JSON::MaybeXS`
 
 ### Accuracy
 

@@ -1,0 +1,16 @@
+name: Benchmark
+
+on:
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build benchmark container
+        run: docker build -f Dockerfile.benchmark -t perlcov-benchmark .
+
+      - name: Run benchmark
+        run: docker run --rm perlcov-benchmark

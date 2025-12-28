@@ -1,0 +1,65 @@
+# Benchmark Dockerfile for perlcov
+#
+# Build and run:
+#   docker build -f Dockerfile.benchmark -t perlcov-benchmark .
+#   docker run --rm perlcov-benchmark
+#
+# This runs a complete benchmark suite comparing:
+# - Sequential prove with Devel::Cover (Storable format)
+# - Parallel perlcov with --json-merge (forces JSON output)
+# - After installing Sereal: sequential and parallel performance
+# - After installing JSON::MaybeXS: sequential and parallel performance
+
+# Stage 1: Build perlcov
+FROM golang:1.21-bookworm AS builder
+
+WORKDIR /build
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN go build -o perlcov ./cmd/perlcov/
+
+# Stage 2: Clean Perl environment for benchmarking
+FROM debian:bookworm-slim
+
+# Install minimal Perl environment + Devel::Cover from source (not distro package)
+RUN apt-get update && apt-get install -y \
+    perl \
+    make \
+    gcc \
+    curl \
+    time \
+    bc \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy perlcov binary from builder
+COPY --from=builder /build/perlcov /app/perlcov
+
+# Install Devel::Cover from CPAN (clean, no extra dependencies)
+RUN curl -sL https://cpan.metacpan.org/authors/id/P/PJ/PJCJ/Devel-Cover-1.44.tar.gz | tar xz \
+    && cd Devel-Cover-1.44 \
+    && perl Makefile.PL \
+    && make install \
+    && cd .. \
+    && rm -rf Devel-Cover-1.44
+
+# Download Moo for benchmarking
+RUN curl -sL "https://cpan.metacpan.org/authors/id/H/HA/HAARG/Moo-2.005005.tar.gz" | tar xz
+
+# Install Moo's minimal dependencies from CPAN
+RUN curl -sL https://cpan.metacpan.org/authors/id/H/HA/HAARG/Sub-Quote-2.006009.tar.gz | tar xz \
+    && cd Sub-Quote-2.006009 && perl Makefile.PL && make install && cd .. && rm -rf Sub-Quote-2.006009
+
+RUN curl -sL https://cpan.metacpan.org/authors/id/H/HA/HAARG/Role-Tiny-2.002004.tar.gz | tar xz \
+    && cd Role-Tiny-2.002004 && perl Makefile.PL && make install && cd .. && rm -rf Role-Tiny-2.002004
+
+RUN curl -sL https://cpan.metacpan.org/authors/id/E/ET/ETHER/Class-Method-Modifiers-2.15.tar.gz | tar xz \
+    && cd Class-Method-Modifiers-2.15 && perl Makefile.PL && make install && cd .. && rm -rf Class-Method-Modifiers-2.15
+
+# Copy benchmark script
+COPY scripts/run-benchmarks.sh /app/run-benchmarks.sh
+RUN chmod +x /app/run-benchmarks.sh
+
+CMD ["/app/run-benchmarks.sh"]

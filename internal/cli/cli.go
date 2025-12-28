@@ -27,6 +27,7 @@ type Config struct {
 	IgnoreDirs    []string
 	NoSelect      bool
 	Normalize     string // Comma-separated normalization modes
+	JSONMerge     bool   // Use JSON export + Go merging instead of Perl merging
 }
 
 // Version information
@@ -67,6 +68,7 @@ func Run(args []string) error {
 	fs.Var(&sourceDirs, "source", "Source directories to measure coverage (default: lib)")
 	fs.BoolVar(&cfg.NoSelect, "no-select", false, "Disable -select optimization (for benchmarking)")
 	fs.StringVar(&cfg.Normalize, "normalize", "", "Normalize coverage metrics (comma-separated modes: conditions-to-branches, subroutines-to-statements, sonarqube, simple)")
+	fs.BoolVar(&cfg.JSONMerge, "json-merge", false, "Export coverage to JSON and merge in Go (faster for large test suites)")
 
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `perlcov - Fast Perl test coverage tool
@@ -87,6 +89,7 @@ Examples:
   perlcov --html                    # Generate HTML report (slow)
   perlcov --no-rerun-failed         # Don't rerun failed tests without coverage
   perlcov --no-select               # Disable -select optimization (for benchmarking)
+  perlcov --json-merge              # Use JSON export + Go merging (faster)
   perlcov --normalize=conditions-to-branches   # Merge conditions into branches
   perlcov --normalize=sonarqube     # Use SonarQube-style coverage metrics
   perlcov --normalize=simple        # Show only statement coverage
@@ -155,7 +158,7 @@ func runCoverage(cfg *Config) error {
 	}
 
 	// Run tests with coverage
-	r := runner.New(cfg.IncludePaths, cfg.CoverDir, cfg.Jobs, cfg.Verbose, cfg.SourceDirs, cfg.NoSelect)
+	r := runner.New(cfg.IncludePaths, cfg.CoverDir, cfg.Jobs, cfg.Verbose, cfg.SourceDirs, cfg.NoSelect, cfg.JSONMerge)
 	results := r.RunTests(testFiles)
 
 	// Print test results
@@ -171,7 +174,7 @@ func runCoverage(cfg *Config) error {
 
 	// Parse and display coverage
 	fmt.Println("\n--- Coverage Report ---")
-	report, err := coverage.ParseCoverageDB(cfg.CoverDir)
+	report, err := coverage.ParseCoverageDB(cfg.CoverDir, cfg.JSONMerge)
 	if err != nil {
 		return fmt.Errorf("failed to parse coverage: %w", err)
 	}

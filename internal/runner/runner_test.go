@@ -154,7 +154,7 @@ func TestContainsTAPFailure(t *testing.T) {
 }
 
 func TestNewRunner(t *testing.T) {
-	r := New([]string{"/path/to/lib"}, "/cover/dir", 4, true, []string{"lib", "src"}, true)
+	r := New([]string{"/path/to/lib"}, "/cover/dir", 4, true, []string{"lib", "src"}, true, false)
 
 	if len(r.IncludePaths) != 1 || r.IncludePaths[0] != "/path/to/lib" {
 		t.Errorf("IncludePaths = %v, want [/path/to/lib]", r.IncludePaths)
