@@ -28,6 +28,7 @@ type Config struct {
 	NoSelect      bool
 	Normalize     string // Comma-separated normalization modes
 	JSONMerge     bool   // Use JSON export + Go merging instead of Perl merging
+	PerlPath      string // Path to perl executable
 }
 
 // Version information
@@ -43,6 +44,26 @@ func (m *multiString) String() string {
 func (m *multiString) Set(value string) error {
 	*m = append(*m, value)
 	return nil
+}
+
+// printFlagDefaults prints flag defaults with -- for long flags
+func printFlagDefaults(fs *flag.FlagSet) {
+	fs.VisitAll(func(f *flag.Flag) {
+		// Determine prefix: use -- for multi-char flags, - for single-char
+		prefix := "-"
+		if len(f.Name) > 1 {
+			prefix = "--"
+		}
+
+		// Format the flag name and default value
+		var defaultVal string
+		if f.DefValue != "" && f.DefValue != "false" && f.DefValue != "0" && f.DefValue != "[]" {
+			defaultVal = fmt.Sprintf(" (default %s)", f.DefValue)
+		}
+
+		// Print with proper formatting
+		fmt.Fprintf(os.Stderr, "  %s%s\n        %s%s\n", prefix, f.Name, f.Usage, defaultVal)
+	})
 }
 
 // Run executes the CLI with the given arguments
@@ -69,6 +90,7 @@ func Run(args []string) error {
 	fs.BoolVar(&cfg.NoSelect, "no-select", false, "Disable -select optimization (for benchmarking)")
 	fs.StringVar(&cfg.Normalize, "normalize", "", "Normalize coverage metrics (comma-separated modes: conditions-to-branches, subroutines-to-statements, sonarqube, simple)")
 	fs.BoolVar(&cfg.JSONMerge, "json-merge", false, "Export coverage to JSON and merge in Go (faster for large test suites)")
+	fs.StringVar(&cfg.PerlPath, "perl-path", "", "Path to perl executable (default: perl from PATH, or $PERL_PATH)")
 
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `perlcov - Fast Perl test coverage tool
@@ -80,7 +102,7 @@ t/**/*.t (all .t files under the t/ directory, recursively).
 
 Options:
 `)
-		fs.PrintDefaults()
+		printFlagDefaults(fs)
 		fmt.Fprintf(os.Stderr, `
 Examples:
   perlcov                           # Run all tests in t/**/*.t
@@ -93,8 +115,12 @@ Examples:
   perlcov --normalize=conditions-to-branches   # Merge conditions into branches
   perlcov --normalize=sonarqube     # Use SonarQube-style coverage metrics
   perlcov --normalize=simple        # Show only statement coverage
+  perlcov --perl-path=/usr/bin/perl # Use specific perl executable
   perlcov t/unit/                   # Run tests in specific directory
   perlcov t/foo.t t/bar.t           # Run specific test files
+
+Environment Variables:
+  PERL_PATH                         Path to perl executable (overridden by --perl-path)
 
 Note: This tool requires Devel::Cover to be installed.
       Install with: cpan Devel::Cover
@@ -117,6 +143,15 @@ Note: This tool requires Devel::Cover to be installed.
 	cfg.IgnoreDirs = ignoreDirs
 	cfg.SourceDirs = sourceDirs
 
+	// Use PERL_PATH env var as fallback if --perl-path not specified
+	if cfg.PerlPath == "" {
+		if envPath := os.Getenv("PERL_PATH"); envPath != "" {
+			cfg.PerlPath = envPath
+		} else {
+			cfg.PerlPath = "perl" // default to perl in PATH
+		}
+	}
+
 	if len(cfg.SourceDirs) == 0 {
 		cfg.SourceDirs = []string{"lib"}
 	}
@@ -136,7 +171,7 @@ Note: This tool requires Devel::Cover to be installed.
 
 func runCoverage(cfg *Config) error {
 	// Check for Devel::Cover
-	if err := runner.CheckDevelCover(); err != nil {
+	if err := runner.CheckDevelCover(cfg.PerlPath); err != nil {
 		return err
 	}
 
@@ -158,7 +193,7 @@ func runCoverage(cfg *Config) error {
 	}
 
 	// Run tests with coverage
-	r := runner.New(cfg.IncludePaths, cfg.CoverDir, cfg.Jobs, cfg.Verbose, cfg.SourceDirs, cfg.NoSelect, cfg.JSONMerge)
+	r := runner.New(cfg.IncludePaths, cfg.CoverDir, cfg.Jobs, cfg.Verbose, cfg.SourceDirs, cfg.NoSelect, cfg.JSONMerge, cfg.PerlPath)
 	results := r.RunTests(testFiles)
 
 	// Print test results
@@ -174,7 +209,7 @@ func runCoverage(cfg *Config) error {
 
 	// Parse and display coverage
 	fmt.Println("\n--- Coverage Report ---")
-	report, err := coverage.ParseCoverageDB(cfg.CoverDir, cfg.JSONMerge)
+	report, err := coverage.ParseCoverageDB(cfg.CoverDir, cfg.JSONMerge, cfg.PerlPath)
 	if err != nil {
 		return fmt.Errorf("failed to parse coverage: %w", err)
 	}

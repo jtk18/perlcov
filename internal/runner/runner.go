@@ -28,11 +28,12 @@ type Runner struct {
 	Verbose      bool
 	SourceDirs   []string
 	NoSelect     bool
-	JSONMerge    bool // Use JSON format for coverage data (enables pure Go merging)
+	JSONMerge    bool   // Use JSON format for coverage data (enables pure Go merging)
+	PerlPath     string // Path to perl executable
 }
 
 // New creates a new Runner
-func New(includePaths []string, coverDir string, jobs int, verbose bool, sourceDirs []string, noSelect bool, jsonMerge bool) *Runner {
+func New(includePaths []string, coverDir string, jobs int, verbose bool, sourceDirs []string, noSelect bool, jsonMerge bool, perlPath string) *Runner {
 	return &Runner{
 		IncludePaths: includePaths,
 		CoverDir:     coverDir,
@@ -41,12 +42,13 @@ func New(includePaths []string, coverDir string, jobs int, verbose bool, sourceD
 		SourceDirs:   sourceDirs,
 		NoSelect:     noSelect,
 		JSONMerge:    jsonMerge,
+		PerlPath:     perlPath,
 	}
 }
 
 // CheckDevelCover verifies that Devel::Cover is installed
-func CheckDevelCover() error {
-	cmd := exec.Command("perl", "-MDevel::Cover", "-e", "print $Devel::Cover::VERSION")
+func CheckDevelCover(perlPath string) error {
+	cmd := exec.Command(perlPath, "-MDevel::Cover", "-e", "print $Devel::Cover::VERSION")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("Devel::Cover is not installed. Install with: cpan Devel::Cover\nError: %s", string(output))
@@ -187,7 +189,7 @@ func (r *Runner) runSingleTest(testFile string, withCoverage bool) TestResult {
 
 	args = append(args, absTestFile)
 
-	cmd := exec.Command("perl", args...)
+	cmd := exec.Command(r.PerlPath, args...)
 	cmd.Dir = cwd
 
 	var stdout, stderr bytes.Buffer
