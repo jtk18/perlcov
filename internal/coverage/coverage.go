@@ -161,7 +161,7 @@ type runCoverageData struct {
 
 // ParseCoverageDB parses the Devel::Cover database and returns a report
 // If jsonMerge is true, uses pure Go to read JSON files and merge
-func ParseCoverageDB(coverDir string, jsonMerge bool) (*Report, error) {
+func ParseCoverageDB(coverDir string, jsonMerge bool, perlPath string) (*Report, error) {
 	// Check if cover_db exists
 	if _, err := os.Stat(coverDir); os.IsNotExist(err) {
 		return nil, fmt.Errorf("coverage directory %s does not exist", coverDir)
@@ -177,7 +177,7 @@ func ParseCoverageDB(coverDir string, jsonMerge bool) (*Report, error) {
 
 	// If jsonMerge is requested and files aren't JSON, convert them first
 	if jsonMerge && !isJSON {
-		if err := convertToJSON(coverDir); err != nil {
+		if err := convertToJSON(coverDir, perlPath); err != nil {
 			return nil, fmt.Errorf("failed to convert to JSON: %w", err)
 		}
 		isJSON = true // Now they're JSON
@@ -191,7 +191,7 @@ func ParseCoverageDB(coverDir string, jsonMerge bool) (*Report, error) {
 		data, err = parseAllRunsJSON(coverDir)
 	} else {
 		// Use Perl to merge Storable/Sereal files
-		data, err = parseAllRuns(coverDir)
+		data, err = parseAllRuns(coverDir, perlPath)
 	}
 	if err != nil {
 		return nil, err
@@ -244,7 +244,7 @@ func ParseCoverageDB(coverDir string, jsonMerge bool) (*Report, error) {
 
 // convertToJSON converts coverage files from Sereal/Storable to JSON format
 // This uses Devel::Cover's IO module to read and JSON::PP (core) to write
-func convertToJSON(coverDir string) error {
+func convertToJSON(coverDir string, perlPath string) error {
 	script := `
 use strict;
 use warnings;
@@ -297,7 +297,7 @@ for my $file (glob("$cover_db/structure/*")) {
 print "ok\n";
 `
 
-	cmd := exec.Command("perl", "-e", script, coverDir)
+	cmd := exec.Command(perlPath, "-e", script, coverDir)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
@@ -356,7 +356,7 @@ func detectJSONFormat(runsDir string) bool {
 }
 
 // parseAllRuns parses all run directories and merges coverage data
-func parseAllRuns(coverDir string) (*runCoverageData, error) {
+func parseAllRuns(coverDir string, perlPath string) (*runCoverageData, error) {
 	// Use Perl to parse all runs and merge - this is more accurate than merging in Go
 	script := `
 use strict;
@@ -517,7 +517,7 @@ for my $file (sort keys %merged) {
 print JSON::PP->new->utf8->encode({ files => \@files });
 `
 
-	cmd := exec.Command("perl", "-e", script, coverDir)
+	cmd := exec.Command(perlPath, "-e", script, coverDir)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

@@ -154,7 +154,7 @@ func TestContainsTAPFailure(t *testing.T) {
 }
 
 func TestNewRunner(t *testing.T) {
-	r := New([]string{"/path/to/lib"}, "/cover/dir", 4, true, []string{"lib", "src"}, true, false)
+	r := New([]string{"/path/to/lib"}, "/cover/dir", 4, true, []string{"lib", "src"}, true, false, "/usr/bin/perl")
 
 	if len(r.IncludePaths) != 1 || r.IncludePaths[0] != "/path/to/lib" {
 		t.Errorf("IncludePaths = %v, want [/path/to/lib]", r.IncludePaths)
@@ -173,5 +173,8 @@ func TestNewRunner(t *testing.T) {
 	}
 	if !r.NoSelect {
 		t.Error("NoSelect = false, want true")
+	}
+	if r.PerlPath != "/usr/bin/perl" {
+		t.Errorf("PerlPath = %q, want /usr/bin/perl", r.PerlPath)
 	}
 }
