@@ -13,11 +13,12 @@ import (
 
 // TestResult holds the result of running a single test
 type TestResult struct {
-	File     string
-	Passed   bool
-	Error    string
-	Output   string
-	Duration time.Duration
+	File      string
+	Passed    bool
+	Error     string
+	Output    string
+	Duration  time.Duration
+	CoverDir  string // The isolated coverage directory used for this test
 }
 
 // Runner runs Perl tests with optional coverage
@@ -58,6 +59,8 @@ func CheckDevelCover(perlPath string) error {
 }
 
 // RunTests runs all test files with coverage
+// Each test file gets its own isolated coverage directory to avoid conflicts
+// when multiple tests exercise the same source files
 func (r *Runner) RunTests(testFiles []string) []TestResult {
 	results := make([]TestResult, len(testFiles))
 
@@ -77,7 +80,9 @@ func (r *Runner) RunTests(testFiles []string) []TestResult {
 		go func() {
 			defer wg.Done()
 			for i := range jobs {
-				result := r.runSingleTest(testFiles[i], true)
+				// Each test gets an isolated coverage directory
+				isolatedCoverDir := fmt.Sprintf("%s_%d", r.CoverDir, i)
+				result := r.runSingleTest(testFiles[i], true, isolatedCoverDir)
 				mu.Lock()
 				results[i] = result
 				mu.Unlock()
@@ -107,7 +112,8 @@ func (r *Runner) RunTestsWithoutCoverage(testFiles []string) []TestResult {
 		go func() {
 			defer wg.Done()
 			for i := range jobs {
-				result := r.runSingleTest(testFiles[i], false)
+				// No coverage directory needed when running without coverage
+				result := r.runSingleTest(testFiles[i], false, "")
 				mu.Lock()
 				results[i] = result
 				mu.Unlock()
@@ -119,12 +125,15 @@ func (r *Runner) RunTestsWithoutCoverage(testFiles []string) []TestResult {
 	return results
 }
 
-func (r *Runner) runSingleTest(testFile string, withCoverage bool) TestResult {
+func (r *Runner) runSingleTest(testFile string, withCoverage bool, coverDir string) TestResult {
 	start := time.Now()
 
 	// Get absolute paths for everything
 	cwd, _ := os.Getwd()
-	absCoverDir := r.CoverDir
+	absCoverDir := coverDir
+	if absCoverDir == "" {
+		absCoverDir = r.CoverDir
+	}
 	if !filepath.IsAbs(absCoverDir) {
 		absCoverDir = filepath.Join(cwd, absCoverDir)
 	}
@@ -203,6 +212,11 @@ func (r *Runner) runSingleTest(testFile string, withCoverage bool) TestResult {
 		File:     testFile,
 		Duration: duration,
 		Output:   stdout.String(),
+	}
+
+	// Record the coverage directory used for this test
+	if withCoverage {
+		result.CoverDir = absCoverDir
 	}
 
 	if err != nil {

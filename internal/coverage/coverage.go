@@ -1161,6 +1161,152 @@ func formatCoverage(covered, total int) string {
 	return fmt.Sprintf("%.1f%%", pct)
 }
 
+// MergeCoverageDBs merges multiple isolated coverage directories into a single output directory
+// Each isolated directory is expected to have the standard Devel::Cover structure:
+// - runs/: subdirectories containing coverage data from each test run
+// - structure/: source file structure information
+// After merging, the isolated directories are cleaned up
+func MergeCoverageDBs(isolatedDirs []string, outputDir string) error {
+	// Filter to only directories that exist and have content
+	var validDirs []string
+	for _, dir := range isolatedDirs {
+		if _, err := os.Stat(dir); err == nil {
+			validDirs = append(validDirs, dir)
+		}
+	}
+
+	if len(validDirs) == 0 {
+		return fmt.Errorf("no valid coverage directories to merge")
+	}
+
+	// Create output directory structure
+	outputRunsDir := filepath.Join(outputDir, "runs")
+	outputStructDir := filepath.Join(outputDir, "structure")
+
+	if err := os.MkdirAll(outputRunsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create output runs directory: %w", err)
+	}
+	if err := os.MkdirAll(outputStructDir, 0755); err != nil {
+		return fmt.Errorf("failed to create output structure directory: %w", err)
+	}
+
+	// Track which structure files we've already copied (by filename to avoid duplicates)
+	copiedStructures := make(map[string]bool)
+
+	// Global run counter to avoid conflicts when merging
+	runCounter := 1
+
+	// Process each isolated directory
+	for _, isolatedDir := range validDirs {
+		// Merge runs
+		runsDir := filepath.Join(isolatedDir, "runs")
+		if entries, err := os.ReadDir(runsDir); err == nil {
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					continue
+				}
+
+				srcRunDir := filepath.Join(runsDir, entry.Name())
+				dstRunDir := filepath.Join(outputRunsDir, fmt.Sprintf("%d", runCounter))
+				runCounter++
+
+				// Copy the run directory
+				if err := copyDir(srcRunDir, dstRunDir); err != nil {
+					return fmt.Errorf("failed to copy run directory %s: %w", srcRunDir, err)
+				}
+			}
+		}
+
+		// Merge structure files
+		structDir := filepath.Join(isolatedDir, "structure")
+		if entries, err := os.ReadDir(structDir); err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() || strings.HasSuffix(entry.Name(), ".lock") {
+					continue
+				}
+
+				// Skip if we've already copied this structure file
+				if copiedStructures[entry.Name()] {
+					continue
+				}
+
+				srcPath := filepath.Join(structDir, entry.Name())
+				dstPath := filepath.Join(outputStructDir, entry.Name())
+
+				if err := copyFile(srcPath, dstPath); err != nil {
+					return fmt.Errorf("failed to copy structure file %s: %w", srcPath, err)
+				}
+				copiedStructures[entry.Name()] = true
+			}
+		}
+
+		// Clean up the isolated directory
+		if err := os.RemoveAll(isolatedDir); err != nil {
+			// Log but don't fail on cleanup errors
+			fmt.Fprintf(os.Stderr, "Warning: failed to clean up %s: %v\n", isolatedDir, err)
+		}
+	}
+
+	return nil
+}
+
+// copyDir copies a directory recursively
+func copyDir(src, dst string) error {
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(dst, srcInfo.Mode()); err != nil {
+		return err
+	}
+
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+
+		if entry.IsDir() {
+			if err := copyDir(srcPath, dstPath); err != nil {
+				return err
+			}
+		} else {
+			if err := copyFile(srcPath, dstPath); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// copyFile copies a single file
+func copyFile(src, dst string) error {
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	srcInfo, err := srcFile.Stat()
+	if err != nil {
+		return err
+	}
+
+	dstFile, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, srcInfo.Mode())
+	if err != nil {
+		return err
+	}
+	defer dstFile.Close()
+
+	_, err = dstFile.ReadFrom(srcFile)
+	return err
+}
+
 // GenerateHTML generates an HTML report using the cover command
 // Note: This is slow because it uses the cover command to merge and render
 func GenerateHTML(coverDir, _ string) error {
