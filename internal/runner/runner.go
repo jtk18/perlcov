@@ -49,7 +49,9 @@ func New(includePaths []string, coverDir string, jobs int, verbose bool, sourceD
 
 // CheckDevelCover verifies that Devel::Cover is installed
 func CheckDevelCover(perlPath string) error {
-	cmd := exec.Command(perlPath, "-MDevel::Cover", "-e", "print $Devel::Cover::VERSION")
+	// Use -silent,1 to suppress verbose output and -ignore with pattern to ignore -e files
+	// The pattern ^\\-e$ matches the literal string "-e" that Devel::Cover sees
+	cmd := exec.Command(perlPath, "-MDevel::Cover=-silent,1,-ignore,^\\-e$", "-e", "print $Devel::Cover::VERSION")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("Devel::Cover is not installed. Install with: cpan Devel::Cover\nError: %s", string(output))
@@ -63,6 +65,7 @@ func CheckDevelCover(perlPath string) error {
 // when multiple tests exercise the same source files
 func (r *Runner) RunTests(testFiles []string) []TestResult {
 	results := make([]TestResult, len(testFiles))
+	total := len(testFiles)
 
 	// Create a channel for jobs
 	jobs := make(chan int, len(testFiles))
@@ -70,6 +73,10 @@ func (r *Runner) RunTests(testFiles []string) []TestResult {
 		jobs <- i
 	}
 	close(jobs)
+
+	// Track progress
+	var completed int
+	var passed int
 
 	// Run tests in parallel
 	var wg sync.WaitGroup
@@ -85,12 +92,24 @@ func (r *Runner) RunTests(testFiles []string) []TestResult {
 				result := r.runSingleTest(testFiles[i], true, isolatedCoverDir)
 				mu.Lock()
 				results[i] = result
+				completed++
+				current := completed
+				if result.Passed {
+					passed++
+				}
+				currentPassed := passed
+				// Print progress every 10 tests or for the last one
+				if current%10 == 0 || int(current) == total {
+					fmt.Printf("\rProgress: %d/%d tests completed (%d passed, %d failed)   ",
+						current, total, currentPassed, current-currentPassed)
+				}
 				mu.Unlock()
 			}
 		}()
 	}
 
 	wg.Wait()
+	fmt.Println() // Newline after progress
 	return results
 }
 

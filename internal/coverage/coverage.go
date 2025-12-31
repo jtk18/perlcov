@@ -1179,6 +1179,9 @@ func MergeCoverageDBs(isolatedDirs []string, outputDir string) error {
 		return fmt.Errorf("no valid coverage directories to merge")
 	}
 
+	total := len(validDirs)
+	showProgress := total > 50 // Only show progress for large merges
+
 	// Create output directory structure
 	outputRunsDir := filepath.Join(outputDir, "runs")
 	outputStructDir := filepath.Join(outputDir, "structure")
@@ -1197,7 +1200,12 @@ func MergeCoverageDBs(isolatedDirs []string, outputDir string) error {
 	runCounter := 1
 
 	// Process each isolated directory
-	for _, isolatedDir := range validDirs {
+	for idx, isolatedDir := range validDirs {
+		// Show progress for large merges
+		if showProgress && (idx%100 == 0 || idx == total-1) {
+			fmt.Printf("\rMerging coverage: %d/%d directories...   ", idx+1, total)
+		}
+
 		// Merge runs
 		runsDir := filepath.Join(isolatedDir, "runs")
 		if entries, err := os.ReadDir(runsDir); err == nil {
@@ -1245,6 +1253,10 @@ func MergeCoverageDBs(isolatedDirs []string, outputDir string) error {
 			// Log but don't fail on cleanup errors
 			fmt.Fprintf(os.Stderr, "Warning: failed to clean up %s: %v\n", isolatedDir, err)
 		}
+	}
+
+	if showProgress {
+		fmt.Println() // Newline after progress
 	}
 
 	return nil
