@@ -187,14 +187,37 @@ func runCoverage(cfg *Config) error {
 
 	fmt.Printf("Found %d test files\n", len(testFiles))
 
-	// Clean previous coverage data
+	// Clean previous coverage data (both main dir and any isolated dirs)
 	if err := os.RemoveAll(cfg.CoverDir); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to clean coverage directory: %w", err)
 	}
+	// Also clean any leftover isolated coverage directories from previous runs
+	for i := 0; i < len(testFiles); i++ {
+		isolatedDir := fmt.Sprintf("%s_%d", cfg.CoverDir, i)
+		os.RemoveAll(isolatedDir) // Ignore errors
+	}
 
-	// Run tests with coverage
+	// Run tests with coverage (each test gets its own isolated coverage directory)
 	r := runner.New(cfg.IncludePaths, cfg.CoverDir, cfg.Jobs, cfg.Verbose, cfg.SourceDirs, cfg.NoSelect, cfg.JSONMerge, cfg.PerlPath)
 	results := r.RunTests(testFiles)
+
+	// Collect isolated coverage directories from test results
+	var isolatedDirs []string
+	for _, result := range results {
+		if result.CoverDir != "" {
+			isolatedDirs = append(isolatedDirs, result.CoverDir)
+		}
+	}
+
+	// Merge isolated coverage directories into the final cover_db
+	if len(isolatedDirs) > 0 {
+		if cfg.Verbose {
+			fmt.Printf("Merging %d coverage directories...\n", len(isolatedDirs))
+		}
+		if err := coverage.MergeCoverageDBs(isolatedDirs, cfg.CoverDir); err != nil {
+			return fmt.Errorf("failed to merge coverage directories: %w", err)
+		}
+	}
 
 	// Print test results
 	printTestResults(results)
