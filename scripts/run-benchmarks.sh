@@ -1,7 +1,12 @@
 #!/bin/bash
 set -e
 
-cd /app/Moo-2.005005
+# Configuration - set these environment variables or use defaults
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PERLCOV="${PERLCOV:-$SCRIPT_DIR/../perlcov}"
+MOO_DIR="${MOO_DIR:-/home/user/Moo-2.005005}"
+
+cd "$MOO_DIR"
 
 echo "=========================================="
 echo "perlcov Benchmark Suite"
@@ -52,9 +57,9 @@ benchmark "Baseline (no coverage)" prove -l t/*.t
 
 benchmark "Sequential Devel::Cover + Storable" bash -c 'PERL5OPT="-MDevel::Cover=-db,cover_db,-silent,1" prove -l t/*.t'
 
-benchmark "perlcov -j $JOBS (Storable)" ../perlcov -j $JOBS
+benchmark "perlcov -j $JOBS (Storable)" $PERLCOV -j $JOBS
 
-benchmark "perlcov -j $JOBS --json-merge (Storable)" ../perlcov -j $JOBS --json-merge
+benchmark "perlcov -j $JOBS --json-merge (Storable)" $PERLCOV -j $JOBS --json-merge
 
 echo "=========================================="
 echo "Phase 2: JSON::PP (pure Perl)"
@@ -75,9 +80,9 @@ echo ""
 
 benchmark "Sequential Devel::Cover + JSON::PP" bash -c 'PERL5OPT="-MDevel::Cover=-db,cover_db,-silent,1" prove -l t/*.t'
 
-benchmark "perlcov -j $JOBS (JSON::PP)" ../perlcov -j $JOBS
+benchmark "perlcov -j $JOBS (JSON::PP)" $PERLCOV -j $JOBS
 
-benchmark "perlcov -j $JOBS --json-merge (JSON::PP)" ../perlcov -j $JOBS --json-merge
+benchmark "perlcov -j $JOBS --json-merge (JSON::PP)" $PERLCOV -j $JOBS --json-merge
 
 echo "=========================================="
 echo "Phase 3: Cpanel::JSON::XS"
@@ -98,9 +103,9 @@ echo ""
 
 benchmark "Sequential Devel::Cover + JSON::XS" bash -c 'PERL5OPT="-MDevel::Cover=-db,cover_db,-silent,1" prove -l t/*.t'
 
-benchmark "perlcov -j $JOBS (JSON::XS)" ../perlcov -j $JOBS
+benchmark "perlcov -j $JOBS (JSON::XS)" $PERLCOV -j $JOBS
 
-benchmark "perlcov -j $JOBS --json-merge (JSON::XS)" ../perlcov -j $JOBS --json-merge
+benchmark "perlcov -j $JOBS --json-merge (JSON::XS)" $PERLCOV -j $JOBS --json-merge
 
 echo "=========================================="
 echo "Phase 4: Sereal (fastest)"
@@ -123,9 +128,9 @@ echo ""
 
 benchmark "Sequential Devel::Cover + Sereal" bash -c 'PERL5OPT="-MDevel::Cover=-db,cover_db,-silent,1" prove -l t/*.t'
 
-benchmark "perlcov -j $JOBS (Sereal)" ../perlcov -j $JOBS
+benchmark "perlcov -j $JOBS (Sereal)" $PERLCOV -j $JOBS
 
-benchmark "perlcov -j $JOBS --json-merge (Sereal)" ../perlcov -j $JOBS --json-merge
+benchmark "perlcov -j $JOBS --json-merge (Sereal)" $PERLCOV -j $JOBS --json-merge
 
 echo "=========================================="
 echo "Coverage Verification"
@@ -134,7 +139,7 @@ echo ""
 echo "Running perlcov and verifying coverage matches 'cover' output..."
 rm -rf cover_db
 # Run perlcov and extract statement coverage from the summary line
-PERLCOV_OUTPUT=$(../perlcov -j $JOBS 2>&1 || true)
+PERLCOV_OUTPUT=$($PERLCOV -j $JOBS 2>&1 || true)
 PERLCOV_STMT=$(echo "$PERLCOV_OUTPUT" | grep "Coverage:" | head -1 | sed 's/.*Coverage: \([0-9.]*\)%.*/\1/')
 # Run cover and extract statement coverage
 COVER_STMT=$(cover -report text cover_db 2>&1 | grep "^Total" | awk '{print $2}')
