@@ -169,3 +169,16 @@ go test ./...
 # Run tests with verbose output
 go test -v ./internal/runner/
 ```
+
+## Git Commit Style
+
+When making commits, only include the Co-Authored-By line. Do NOT include "Generated with Claude Code" or similar messages. The Author should remain the
+exercising user. Ask the authoring user if it isn't the normal one Jason Kiniry <jason.kiniry@gmail.com>.
+
+```
+Co-Authored-By: Claude MODEL_NAME VERSION <noreply@anthropic.com>
+```
+
+Where MODEL_NAME and VERSION are replaced with the Claude model name and version.
+
+Try to only use one commit for a branch. Amend it with new information until it is merged.

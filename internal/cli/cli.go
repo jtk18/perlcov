@@ -32,7 +32,7 @@ type Config struct {
 }
 
 // Version information
-const Version = "0.1.0"
+const Version = "0.1.2"
 
 // multiString implements flag.Value for multiple -I flags
 type multiString []string
