@@ -3,6 +3,7 @@ package runner
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,10 +32,11 @@ type Runner struct {
 	NoSelect     bool
 	JSONMerge    bool   // Use JSON format for coverage data (enables pure Go merging)
 	PerlPath     string // Path to perl executable
+	ShowOutput   bool   // Show test output during execution
 }
 
 // New creates a new Runner
-func New(includePaths []string, coverDir string, jobs int, verbose bool, sourceDirs []string, noSelect bool, jsonMerge bool, perlPath string) *Runner {
+func New(includePaths []string, coverDir string, jobs int, verbose bool, sourceDirs []string, noSelect bool, jsonMerge bool, perlPath string, showOutput bool) *Runner {
 	return &Runner{
 		IncludePaths: includePaths,
 		CoverDir:     coverDir,
@@ -44,6 +46,7 @@ func New(includePaths []string, coverDir string, jobs int, verbose bool, sourceD
 		NoSelect:     noSelect,
 		JSONMerge:    jsonMerge,
 		PerlPath:     perlPath,
+		ShowOutput:   showOutput,
 	}
 }
 
@@ -116,12 +119,17 @@ func (r *Runner) RunTests(testFiles []string) []TestResult {
 // RunTestsWithoutCoverage runs tests without Devel::Cover
 func (r *Runner) RunTestsWithoutCoverage(testFiles []string) []TestResult {
 	results := make([]TestResult, len(testFiles))
+	total := len(testFiles)
 
 	jobs := make(chan int, len(testFiles))
 	for i := range testFiles {
 		jobs <- i
 	}
 	close(jobs)
+
+	// Track progress
+	var completed int
+	var passed int
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -135,12 +143,24 @@ func (r *Runner) RunTestsWithoutCoverage(testFiles []string) []TestResult {
 				result := r.runSingleTest(testFiles[i], false, "")
 				mu.Lock()
 				results[i] = result
+				completed++
+				current := completed
+				if result.Passed {
+					passed++
+				}
+				currentPassed := passed
+				// Print progress every 10 tests or for the last one
+				if current%10 == 0 || int(current) == total {
+					fmt.Printf("\rProgress: %d/%d tests completed (%d passed, %d failed)   ",
+						current, total, currentPassed, current-currentPassed)
+				}
 				mu.Unlock()
 			}
 		}()
 	}
 
 	wg.Wait()
+	fmt.Println() // Newline after progress
 	return results
 }
 
@@ -221,8 +241,14 @@ func (r *Runner) runSingleTest(testFile string, withCoverage bool, coverDir stri
 	cmd.Dir = cwd
 
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	if r.ShowOutput {
+		// Stream output to terminal while also capturing it
+		cmd.Stdout = io.MultiWriter(os.Stdout, &stdout)
+		cmd.Stderr = io.MultiWriter(os.Stderr, &stderr)
+	} else {
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+	}
 
 	err := cmd.Run()
 	duration := time.Since(start)

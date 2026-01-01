@@ -29,6 +29,8 @@ type Config struct {
 	Normalize     string // Comma-separated normalization modes
 	JSONMerge     bool   // Use JSON export + Go merging instead of Perl merging
 	PerlPath      string // Path to perl executable
+	NoCover       bool   // Disable coverage collection (for debugging test runs)
+	ShowOutput    bool   // Show test output during execution
 }
 
 // Version information
@@ -91,6 +93,8 @@ func Run(args []string) error {
 	fs.StringVar(&cfg.Normalize, "normalize", "", "Normalize coverage metrics (comma-separated modes: conditions-to-branches, subroutines-to-statements, sonarqube, simple)")
 	fs.BoolVar(&cfg.JSONMerge, "json-merge", false, "Export coverage to JSON and merge in Go (faster for large test suites)")
 	fs.StringVar(&cfg.PerlPath, "perl-path", "", "Path to perl executable (default: perl from PATH, or $PERL_PATH)")
+	fs.BoolVar(&cfg.NoCover, "no-cover", false, "Disable coverage collection (for debugging test runs)")
+	fs.BoolVar(&cfg.ShowOutput, "show-output", false, "Show test output during execution")
 
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `perlcov - Fast Perl test coverage tool
@@ -111,6 +115,8 @@ Examples:
   perlcov --html                    # Generate HTML report (slow)
   perlcov --no-rerun-failed         # Don't rerun failed tests without coverage
   perlcov --no-select               # Disable -select optimization (for benchmarking)
+  perlcov --no-cover                # Run tests without coverage (for debugging)
+  perlcov --show-output             # Show test output during execution
   perlcov --json-merge              # Use JSON export + Go merging (faster)
   perlcov --normalize=conditions-to-branches   # Merge conditions into branches
   perlcov --normalize=sonarqube     # Use SonarQube-style coverage metrics
@@ -170,9 +176,11 @@ Note: This tool requires Devel::Cover to be installed.
 }
 
 func runCoverage(cfg *Config) error {
-	// Check for Devel::Cover
-	if err := runner.CheckDevelCover(cfg.PerlPath); err != nil {
-		return err
+	// Check for Devel::Cover (skip if --no-cover)
+	if !cfg.NoCover {
+		if err := runner.CheckDevelCover(cfg.PerlPath); err != nil {
+			return err
+		}
 	}
 
 	// Discover test files
@@ -186,36 +194,49 @@ func runCoverage(cfg *Config) error {
 	}
 
 	fmt.Printf("Found %d test files\n", len(testFiles))
-
-	// Clean previous coverage data (both main dir and any isolated dirs)
-	if err := os.RemoveAll(cfg.CoverDir); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to clean coverage directory: %w", err)
-	}
-	// Also clean any leftover isolated coverage directories from previous runs
-	for i := 0; i < len(testFiles); i++ {
-		isolatedDir := fmt.Sprintf("%s_%d", cfg.CoverDir, i)
-		os.RemoveAll(isolatedDir) // Ignore errors
+	if cfg.NoCover {
+		fmt.Println("Coverage collection disabled (--no-cover)")
 	}
 
-	// Run tests with coverage (each test gets its own isolated coverage directory)
-	r := runner.New(cfg.IncludePaths, cfg.CoverDir, cfg.Jobs, cfg.Verbose, cfg.SourceDirs, cfg.NoSelect, cfg.JSONMerge, cfg.PerlPath)
-	results := r.RunTests(testFiles)
-
-	// Collect isolated coverage directories from test results
-	var isolatedDirs []string
-	for _, result := range results {
-		if result.CoverDir != "" {
-			isolatedDirs = append(isolatedDirs, result.CoverDir)
+	// Clean previous coverage data (both main dir and any isolated dirs) - skip if --no-cover
+	if !cfg.NoCover {
+		if err := os.RemoveAll(cfg.CoverDir); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to clean coverage directory: %w", err)
+		}
+		// Also clean any leftover isolated coverage directories from previous runs
+		for i := 0; i < len(testFiles); i++ {
+			isolatedDir := fmt.Sprintf("%s_%d", cfg.CoverDir, i)
+			os.RemoveAll(isolatedDir) // Ignore errors
 		}
 	}
 
-	// Merge isolated coverage directories into the final cover_db
-	if len(isolatedDirs) > 0 {
-		if cfg.Verbose {
-			fmt.Printf("Merging %d coverage directories...\n", len(isolatedDirs))
+	// Run tests
+	r := runner.New(cfg.IncludePaths, cfg.CoverDir, cfg.Jobs, cfg.Verbose, cfg.SourceDirs, cfg.NoSelect, cfg.JSONMerge, cfg.PerlPath, cfg.ShowOutput)
+
+	var results []runner.TestResult
+	if cfg.NoCover {
+		// Run tests without coverage
+		results = r.RunTestsWithoutCoverage(testFiles)
+	} else {
+		// Run tests with coverage (each test gets its own isolated coverage directory)
+		results = r.RunTests(testFiles)
+
+		// Collect isolated coverage directories from test results
+		var isolatedDirs []string
+		for _, result := range results {
+			if result.CoverDir != "" {
+				isolatedDirs = append(isolatedDirs, result.CoverDir)
+			}
 		}
-		if err := coverage.MergeCoverageDBs(isolatedDirs, cfg.CoverDir); err != nil {
-			return fmt.Errorf("failed to merge coverage directories: %w", err)
+
+		// Merge isolated coverage directories into the final cover_db
+		if len(isolatedDirs) > 0 {
+			if cfg.Verbose {
+				fmt.Printf("Merging %d coverage directories...\n", len(isolatedDirs))
+			}
+			if err := coverage.MergeCoverageDBs(isolatedDirs, cfg.CoverDir); err != nil {
+				return fmt.Errorf("failed to merge coverage directories: %w", err)
+			}
 		}
 	}
 
@@ -223,48 +244,54 @@ func runCoverage(cfg *Config) error {
 	printTestResults(results)
 
 	// Handle failed tests - rerun by default to detect Devel::Cover-related failures
+	// Skip rerun logic if --no-cover since there's no coverage to debug
 	failedTests := getFailedTests(results)
-	if len(failedTests) > 0 && !cfg.NoRerunFailed {
+	if len(failedTests) > 0 && !cfg.NoRerunFailed && !cfg.NoCover {
 		fmt.Println("\n--- Rerunning failed tests without Devel::Cover ---")
 		rerunResults := r.RunTestsWithoutCoverage(failedTests)
 		printRerunResults(results, rerunResults)
 	}
 
-	// Parse and display coverage
-	fmt.Println("\n--- Coverage Report ---")
-	report, err := coverage.ParseCoverageDB(cfg.CoverDir, cfg.JSONMerge, cfg.PerlPath)
-	if err != nil {
-		return fmt.Errorf("failed to parse coverage: %w", err)
-	}
-
-	// Apply normalization if specified
-	if cfg.Normalize != "" {
-		normConfig, err := coverage.ParseNormalizationModes(cfg.Normalize)
+	// Parse and display coverage (skip if --no-cover)
+	var report *coverage.Report
+	if !cfg.NoCover {
+		fmt.Println("\n--- Coverage Report ---")
+		report, err = coverage.ParseCoverageDB(cfg.CoverDir, cfg.JSONMerge, cfg.PerlPath)
 		if err != nil {
-			return fmt.Errorf("invalid --normalize value: %w", err)
+			return fmt.Errorf("failed to parse coverage: %w", err)
 		}
-		report.Normalize(normConfig)
-	}
 
-	coverage.PrintReport(report, cfg.Verbose)
-
-	// Generate HTML if requested
-	if cfg.HTML {
-		fmt.Println("\n⚠️  WARNING: HTML report generation using 'cover' can be very slow")
-		fmt.Println("   For large codebases, this may take several minutes...")
-		if err := coverage.GenerateHTML(cfg.CoverDir, cfg.OutputDir); err != nil {
-			return fmt.Errorf("failed to generate HTML report: %w", err)
+		// Apply normalization if specified
+		if cfg.Normalize != "" {
+			normConfig, err := coverage.ParseNormalizationModes(cfg.Normalize)
+			if err != nil {
+				return fmt.Errorf("invalid --normalize value: %w", err)
+			}
+			report.Normalize(normConfig)
 		}
-		htmlPath := filepath.Join(cfg.OutputDir, cfg.CoverDir, "coverage.html")
-		fmt.Printf("\n📊 HTML report generated: %s\n", htmlPath)
+
+		coverage.PrintReport(report, cfg.Verbose)
+
+		// Generate HTML if requested
+		if cfg.HTML {
+			fmt.Println("\n⚠️  WARNING: HTML report generation using 'cover' can be very slow")
+			fmt.Println("   For large codebases, this may take several minutes...")
+			if err := coverage.GenerateHTML(cfg.CoverDir, cfg.OutputDir); err != nil {
+				return fmt.Errorf("failed to generate HTML report: %w", err)
+			}
+			htmlPath := filepath.Join(cfg.OutputDir, cfg.CoverDir, "coverage.html")
+			fmt.Printf("\n📊 HTML report generated: %s\n", htmlPath)
+		}
 	}
 
 	// Summary
 	passCount := len(results) - len(failedTests)
 	fmt.Printf("\n=== Summary ===\n")
 	fmt.Printf("Tests: %d passed, %d failed, %d total\n", passCount, len(failedTests), len(results))
-	fmt.Printf("Coverage: %.1f%% statement, %.1f%% branch\n",
-		report.Summary.Statement, report.Summary.Branch)
+	if !cfg.NoCover && report != nil {
+		fmt.Printf("Coverage: %.1f%% statement, %.1f%% branch\n",
+			report.Summary.Statement, report.Summary.Branch)
+	}
 
 	if len(failedTests) > 0 {
 		return fmt.Errorf("%d test(s) failed", len(failedTests))
